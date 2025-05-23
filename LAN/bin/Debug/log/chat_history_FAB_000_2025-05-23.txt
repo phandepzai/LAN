@@ -1,0 +1,19 @@
+[2025-05-23 17:22:17] FAB_FAB: ádsa
+[2025-05-23 17:22:18] FAB_FAB: ádsa
+[2025-05-23 17:22:18] FAB_FAB: đá
+[2025-05-23 17:22:19] FAB_FAB: adasd
+[2025-05-23 17:23:05] FAB_FAB: public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+[2025-05-23 17:23:10] FAB_FAB: public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+public RectangleF BubbleBounds { get; set; }
+public RectangleF AvatarBounds { get; set; }
+[2025-05-23 17:23:32] FAB_FAB: Đây là web goo.gl bấm vào để mở web

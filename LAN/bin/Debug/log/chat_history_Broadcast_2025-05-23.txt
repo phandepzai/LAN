@@ -1,0 +1,239 @@
+[2025-05-23 16:11:47] PHANDAIK: adadadasdasdsadasdasd
+[2025-05-23 16:11:50] PHANDAIK: ádasdsadhsadjjhdjadahjd
+[2025-05-23 16:11:52] PHANDAIK: ádsahdajhdjhadkjadkjadka
+[2025-05-23 16:20:21] PHANDAIK: Những con đường em đi
+[2025-05-23 17:01:20] FAB_000: sdsad
+[2025-05-23 17:01:21] FAB_000: ádsadsa
+[2025-05-23 17:01:23] FAB_000: ádsadaddasdsadsad
+[2025-05-23 17:01:25] FAB_000: ádsadasdasd
+[2025-05-23 17:01:26] FAB_000: ádasdasda
+[2025-05-23 17:21:50] FAB_000: sadsad
+[2025-05-23 17:21:51] FAB_000: ádad
+[2025-05-23 17:21:53] FAB_000: sadasd
+[2025-05-23 17:21:53] FAB_000: ád
+[2025-05-23 17:21:54] FAB_000: ád
+[2025-05-23 17:22:09] FAB_FAB: sdfdsf
+[2025-05-23 17:22:10] FAB_FAB: sdfdsf
+[2025-05-23 17:22:11] FAB_FAB: sdf
+[2025-05-23 17:22:11] FAB_FAB: dsfd
+[2025-05-23 17:22:11] FAB_FAB: sfdsf
+[2025-05-23 17:22:11] FAB_FAB: sf
+[2025-05-23 17:29:38] FAB_NVP: sdfdsfdsf
+[2025-05-23 17:29:39] FAB_NVP: dsfdsf
+[2025-05-23 17:29:39] FAB_NVP: dsf
+[2025-05-23 17:35:56] FAB_NVP456: Phấn
+[2025-05-23 17:36:10] FAB_NVP456: private void ChatListBox_DrawItem(object sender, DrawItemEventArgs e)
+{
+    if (e.Index < 0 || e.Index >= _chatMessages.Count) return;
+
+    ChatMessage message = _chatMessages[e.Index];
+    if (message.CalculatedTotalSize.IsEmpty)
+    {
+        using (Graphics g = e.Graphics)
+        {
+            MessageRenderer.PrepareMessageForDrawing(message, g, chatListBox.Width - AvatarWidth - AvatarPadding - 20, chatListBox.Font);
+        }
+    }
+
+    Image avatar = message.IsMyMessage ? _myAvatar : GetAvatarForUser(message.SenderName);
+    MessageRenderer.DrawMessage(e.Graphics, e.Bounds, message, e.State, chatListBox.Font, avatar);
+}
+[2025-05-23 17:36:19] FAB_NVP456: private void ChatListBox_DrawItem(object sender, DrawItemEventArgs e)
+{
+    if (e.Index < 0 || e.Index >= _chatMessages.Count) return;
+
+    ChatMessage message = _chatMessages[e.Index];
+    if (message.CalculatedTotalSize.IsEmpty)
+    {
+        using (Graphics g = e.Graphics)
+        {
+            MessageRenderer.PrepareMessageForDrawing(message, g, chatListBox.Width - AvatarWidth - AvatarPadding - 20, chatListBox.Font);
+        }
+    }
+
+    Image avatar = message.IsMyMessage ? _myAvatar : GetAvatarForUser(message.SenderName);
+    MessageRenderer.DrawMessage(e.Graphics, e.Bounds, message, e.State, chatListBox.Font, avatar);
+}
+[2025-05-23 17:36:22] FAB_NVP456: sdfsdfdsfdsf
+[2025-05-23 17:36:23] FAB_NVP456: sdfdsfsfsd
+[2025-05-23 17:36:31] FAB_NVP456: Bạn cần định nghĩa thuộc tính CalculatedSenderNameSize trong lớp ChatMessage. Nếu ChatMessage chưa có file riêng, bạn cần tạo hoặc thêm thuộc tính này vào file chứa định nghĩa lớp ChatMessage.
+Kiểm tra kỹ các tham số như senderNameGap để đảm bảo giao diện hiển thị đẹp mắt. Bạn có thể điều chỉnh giá trị này (hiện tại là 5) để thay đổi khoảng cách giữa tên người gửi và bong bóng.
+Nếu bạn muốn tên người gửi được định dạng khác (ví dụ: in đậm), bạn có thể tạo một font riêng cho tên người gửi trong MessageRenderer.cs (tương tự _timestampFont) và sử dụng nó trong g.DrawString.
+[2025-05-23 17:37:16] FAB_NVP456: bounds.Y + 5,
+                bubbleWidth,
+                bubbleHeight);
+            avatarRect = new RectangleF(
+                bubbleRect.Right + avatarPadding,
+                bounds.Y + 5,
+                avatarSize,
+                avatarSize);
+            contentRect = new RectangleF(
+                bubbleRect.X + horizontalBubblePadding,
+                bubbleRect.Y + verticalBubblePadding,
+                contentSize.Width,
+                contentSize.Height);
+            timestampRect = new RectangleF(
+                bubbleRect.Right - timestampSize.Width,
+                bubbleRect.Bottom + 2,
+                timestampSize.Width,
+                timestampSize.Height);
+[2025-05-23 17:37:35] FAB_NVP456: The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+[2025-05-23 17:37:50] FAB_NVP456: The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+[2025-05-23 17:38:00] FAB_NVP456: The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+[2025-05-23 17:38:04] FAB_NVP456: The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+The thread 13128 has exited with code 0 (0x0).
+The thread 18828 has exited with code 0 (0x0).
+[2025-05-23 17:42:06] FAB_NVP456: // Đo kích thước thời gian
+    SizeF timestampSizeF = g.MeasureString(message.Timestamp.ToString("HH:mm"), _timestampFont, maxBubbleContentWidth, stringFormat);
+    message.CalculatedTimestampSize = new SizeF((float)Math.Ceiling(timestampSizeF.Width), (float)Math.Ceiling(timestampSizeF.Height));
+
+    float bubbleContentWidth = message.CalculatedContentSize.Width;
+    float bubbleContentHeight = message.CalculatedContentSize.Height;
+
+    float bubbleWidth = bubbleContentWidth + (2 * horizontalBubblePadding);
+    float bubbleHeight = bubbleContentHeight + (2 * verticalBubblePadding);
+
+    // Tính toán tổng kích thước
+    message.CalculatedTotalSize = new SizeF(
+        Math.Max(bubbleWidth, message.CalculatedSenderNameSize.Width) + (message.Avatar != null ? avatarSize + avatarPadding : 0) + 20,
+        bubbleHeight + timestampBubbleGap + message.CalculatedTimestampSize.Height + itemBottomMargin + (senderNameSizeF.Height > 0 ? senderNameSizeF.Height + senderNameGap : 0)
+    );
+[2025-05-23 17:42:41] FAB_: Kiểm tra giao diện: Sau khi áp dụng thay đổi, hãy kiểm tra giao diện với các tin nhắn chứa nhiều URL và văn bản dài để đảm bảo hiển thị đúng. Nếu cần, bạn có thể điều chỉnh các thông số như horizontalBubblePadding hoặc maxBubbleContentWidth để cải thiện bố cục.
+Hiệu suất: Việc đo kích thước văn bản với StringFormat có thể tốn tài nguyên hơn một chút. Nếu ứng dụng của bạn xử lý nhiều tin nhắn, hãy cân nhắc tối ưu hóa thêm (ví dụ: lưu trữ kết quả đo để tái sử dụng).
+Màu sắc: Đảm bảo rằng màu của văn bản và URL (defaultBrush, UrlBrush) đủ tương phản để người dùng dễ đọc.
+[2025-05-23 17:42:57] FAB_: Kiểm tra giao diện: Sau khi áp dụng thay đổi, hãy kiểm tra giao diện với các tin nhắn chứa nhiều URL và văn bản dài để đảm bảo hiển thị đúng. Nếu cần, bạn có thể điều chỉnh các thông số như horizontalBubblePadding hoặc maxBubbleContentWidth để cải thiện bố cục.
+Hiệu suất: Việc đo kích thước văn bản với StringFormat có thể tốn tài nguyên hơn một chút. Nếu ứng dụng của bạn xử lý nhiều tin nhắn, hãy cân nhắc tối ưu hóa thêm (ví dụ: lưu trữ kết quả đo để tái sử dụng).
+Màu sắc: Đảm bảo rằng màu của văn bản và URL (defaultBrush, UrlBrush) đủ tương phản để người dùng dễ đọc.
+[2025-05-23 17:43:20] FAB_: Văn bản và URL sẽ được vẽ tuần tự, hỗ trợ xuống dòng tự động khi vượt quá chiều rộng của
+Văn bản và URL sẽ được vẽ tuần tự, hỗ trợ xuống dòng tự động khi vượt quá chiều rộng của
+Văn bản và URL sẽ được vẽ tuần tự, hỗ trợ xuống dòng tự động khi vượt quá chiều rộng của
+[2025-05-23 17:44:02] FAB_: Đây là trang web google.com, xin mời bạn đăng nhập
+[2025-05-23 17:44:22] FAB_: Đây là trang web google.com, xin mời bạn đăng nhập
+Hãy nhập
+Logon
+[2025-05-23 18:00:10] NVP: string displayText = GetFormattedMessageText(message);
+string senderName = message.IsMyMessage ? "" : message.SenderName;
+
+int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f);
+int horizontalBubblePadding = 15;
+int verticalBubblePadding = 10;
+int timestampBubbleGap = 8;
+int itemBottomMargin = 8;
+int avatarSize = 40;
+int avatarPadding = 5;
+int senderNameGap = 5;
+[2025-05-23 18:00:24] NVP: string displayText = GetFormattedMessageText(message);
+string senderName = message.IsMyMessage ? "" : message.SenderName;https://grok.com/chat/8f45df31-3f68-424c-9db5-684d6a4118b9
+
+int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f);
+int horizontalBubblePadding = 15;
+int verticalBubblePadding = 10;
+int timestampBubbleGap = 8;
+int itemBottomMargin = 8;
+int avatarSize = 40;
+int avatarPadding = 5;
+int senderNameGap = 5;
+[2025-05-23 18:00:45] NVP: string url = match.Value;
+        SizeF urlSize = g.MeasureString(url, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+        maxContentWidth = Math.Max(maxContentWidth, urlSize.Width);
+        message.UrlRegions.Add(new UrlRegion(new RectangleF(0, currentY, urlSize.Width, urlSize.Height), url));
+        currentY += urlSize.Height; // Tăng chiều cao
+
+        lastIndex = match.Index + match.Length;
+[2025-05-23 18:03:13] PHAN: ádsadad
+[2025-05-23 18:03:13] PHAN: ád
+[2025-05-23 18:03:13] PHAN: ad
+[2025-05-23 18:03:14] PHAN: sa
+[2025-05-23 18:03:14] PHAN: da
+[2025-05-23 18:03:14] PHAN: ds
+[2025-05-23 18:03:14] PHAN: ad
+[2025-05-23 18:03:14] PHAN: sa
+[2025-05-23 18:04:47] PHAN: dsfsdfsjfjsfsdfksdf
+[2025-05-23 18:04:56] PHAN: sdfsdfsdfhtrong cơn sa
+[2025-05-23 18:05:37] NONGVANPHAN: SDFSDFSDF
+[2025-05-23 18:05:40] NONGVANPHAN: SDJHDSHDFFDSKFSDFDSKJFSD
+[2025-05-23 18:05:43] NONGVANPHAN: HADSAHDHASHDASSDSADGSADSGADSAD
+[2025-05-23 18:05:57] NONGVANPHAN: DSFDSFSDFHSDFHSDFHSFHHSFJHSFJHSFHSFHSHJHASDHGASHDASDSADGHSAHGDSAHGDAFSDFGADFGADADFGAFHDGFGHASDASDGASDHFGSADSAHDGSADGSADHGADGHFSADHGASGHDASHDGASDHGSADGHSADGHSAHGDSAHGDHGSDH
+[2025-05-23 18:15:23] NONGVANPHAN: ÁDSADAD
+[2025-05-23 18:15:24] NONGVANPHAN: ÁD
+[2025-05-23 18:15:24] NONGVANPHAN: AD
+[2025-05-23 18:15:24] NONGVANPHAN: ÁD
+[2025-05-23 18:15:24] NONGVANPHAN: SA
+[2025-05-23 18:15:24] NONGVANPHAN: DA
+[2025-05-23 18:45:13] NONGVANPHAN: ádsada
+[2025-05-23 18:45:13] NONGVANPHAN: ádsa
+[2025-05-23 18:45:14] NONGVANPHAN: sa
+[2025-05-23 18:46:18] NONGVANPHAN: dâd
+[2025-05-23 18:46:19] NONGVANPHAN: ádsad
+[2025-05-23 18:46:19] NONGVANPHAN: á
+[2025-05-23 18:46:19] NONGVANPHAN: d
+[2025-05-23 18:46:19] NONGVANPHAN: ád
+[2025-05-23 18:46:19] NONGVANPHAN: ad
+[2025-05-23 18:46:19] NONGVANPHAN: a
+[2025-05-23 18:47:16] NONGVANPHAN: sdadasd
+[2025-05-23 18:47:17] NONGVANPHAN: ádasd
+[2025-05-23 18:47:18] NONGVANPHAN: ád
+[2025-05-23 18:47:18] NONGVANPHAN: sad
+[2025-05-23 18:47:18] NONGVANPHAN: sad
+[2025-05-23 18:47:24] NONGVANPHAN: sadsadjialjidjalkdalkjsd
+[2025-05-23 18:47:26] NONGVANPHAN: sadsadsad
+[2025-05-23 18:47:27] NONGVANPHAN: \'
+[2025-05-23 18:50:22] NONGVANPHAN: dsadsadsadasdkasdasdkjadsjdsajadsj
+[2025-05-23 18:50:32] NONGVANPHAN: vietnamnet.vn
+[2025-05-23 19:50:27] NONGVANPHAN: int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f);
+int horizontalBubblePadding = 15;
+int verticalBubblePadding = 10;
+int timestampBubbleGap = 8;
+int itemBottomMargin = 8;
+int avatarSize = 40;
+int avatarPadding = 5;
+int senderNameGap = 5;
+int readStatusHeight = 15; // Chiều cao của trạng thái "đã xem" [IsRead:True]
+[2025-05-23 19:52:48] NONGVANPHAN: ds [IsRead:True]
+[2025-05-23 19:52:49] NONGVANPHAN: sdfds [IsRead:True]
+[2025-05-23 19:52:50] NONGVANPHAN: sdf [IsRead:True]
+[2025-05-23 19:55:22] FAB: sdadasdasdsadasdsad [IsRead:True]
+[2025-05-23 19:55:24] FAB: sadsad [IsRead:True]
+[2025-05-23 19:55:25] FAB: asdsad [IsRead:True]
+[2025-05-23 19:55:25] FAB: asd [IsRead:True]
+[2025-05-23 20:13:17] NONGVANPHAN: dsfsdfds [IsRead:False]
+[2025-05-23 20:13:18] NONGVANPHAN: sdfsd [IsRead:False]
+[2025-05-23 20:13:19] NONGVANPHAN: sdf [IsRead:False]
+[2025-05-23 20:13:19] NONGVANPHAN: sdf [IsRead:False]
+[2025-05-23 20:18:14] NONGVANPHAN: dsfdsf
+[2025-05-23 20:18:15] NONGVANPHAN: sdf
+[2025-05-23 20:18:15] NONGVANPHAN: dsf
+[2025-05-23 20:21:24] FAB: dsdfsdfdsf
+[2025-05-23 20:22:56] NONGVANPHAN: ádsadsad
+[2025-05-23 20:22:56] NONGVANPHAN: áda
+[2025-05-23 20:22:57] NONGVANPHAN: sad
+[2025-05-23 20:22:57] NONGVANPHAN: sad
+[2025-05-23 20:23:02] NONGVANPHAN: ádsadsa
+[2025-05-23 20:23:02] NONGVANPHAN: sad
