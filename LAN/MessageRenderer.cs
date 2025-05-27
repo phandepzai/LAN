@@ -1,0 +1,393 @@
+﻿using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using System.Drawing.Text;
+using System.Collections.Generic;
+using System.Diagnostics;
+
+namespace Messenger
+{
+    // Lớp tĩnh chịu trách nhiệm vẽ các tin nhắn lên giao diện người dùng.
+    public static class MessageRenderer
+    {
+        // Biểu thức chính quy để tìm kiếm URL trong nội dung tin nhắn.
+        private static readonly Regex UrlRegex = new Regex(@"\b(?:https?://|www\.)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,6}(?:/\S*)?\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        // Màu nền cho tin nhắn của người dùng hiện tại.
+        private static readonly SolidBrush MyMessageBackgroundBrush = new SolidBrush(Color.FromArgb(152, 251, 152)); // Màu xanh lá cây nhạt
+        // Màu nền cho tin nhắn của người dùng khác.
+        private static readonly SolidBrush OtherMessageBackgroundBrush = new SolidBrush(Color.PaleGoldenrod); // Màu vàng nhạt
+        // Màu chữ cho tin nhắn của người dùng hiện tại.
+        private static readonly SolidBrush MyMessageTextBrush = new SolidBrush(Color.Black);
+        // Màu chữ cho tin nhắn của người dùng khác.
+        private static readonly SolidBrush OtherMessageTextBrush = new SolidBrush(Color.Black);
+        // Màu chữ cho thời gian gửi tin nhắn.
+        private static readonly SolidBrush TimestampBrush = new SolidBrush(Color.Gray);
+        // Màu chữ cho các URL được phát hiện trong tin nhắn.
+        private static readonly SolidBrush UrlBrush = new SolidBrush(Color.Blue);
+        // Font chữ sử dụng để vẽ thời gian gửi tin nhắn.
+        private static Font _timestampFont;
+
+        // Nhận vào một font chữ cơ bản để tạo font chữ cho thời gian.
+        public static void Initialize(Font baseFont)
+        {
+            // Kiểm tra nếu font chữ cơ bản được cung cấp và font chữ thời gian chưa được khởi tạo.
+            if (baseFont != null && _timestampFont == null)
+            {
+                // Tạo một font chữ mới cho thời gian dựa trên font chữ cơ bản nhưng có kích thước nhỏ hơn (70%).
+                _timestampFont = new Font(baseFont.FontFamily, baseFont.Size * 0.7f);
+            }
+        }
+
+        // Phương thức lấy nội dung tin nhắn đã được định dạng (hiện tại chỉ trả về nội dung gốc).
+        private static string GetFormattedMessageText(ChatMessage message)
+        {
+            return message.Content; // Chỉ trả về nội dung tin nhắn
+        }
+        // Nhận vào đối tượng ChatMessage, đối tượng Graphics để vẽ, chiều rộng của ListBox chứa tin nhắn và font chữ mặc định.
+        public static void PrepareMessageForDrawing(ChatMessage message, Graphics g, int listBoxWidth, Font defaultFont)
+        {
+            // Đảm bảo font chữ thời gian đã được khởi tạo nếu chưa.
+            if (_timestampFont == null)
+            {
+                Initialize(new Font("Arial", 10));
+            }
+
+            // Xóa các vùng URL đã được tính toán trước đó cho tin nhắn này.
+            message.UrlRegions.Clear();
+
+            // Lấy nội dung tin nhắn đã được định dạng để hiển thị.
+            string displayText = GetFormattedMessageText(message);
+            // Xác định tên người gửi (rỗng nếu là tin nhắn của người dùng hiện tại).
+            string senderName = message.IsMyMessage ? "" : message.SenderName;
+
+            // Tính toán các kích thước và khoảng cách cố định cho việc vẽ tin nhắn.
+            int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f); // Chiều rộng tối đa của "bong bóng" tin nhắn (70% chiều rộng ListBox).
+            int horizontalBubblePadding = 15; // Khoảng cách ngang bên trong "bong bóng".
+            int verticalBubblePadding = 10; // Khoảng cách dọc bên trong "bong bóng".
+            int timestampBubbleGap = 8; // Khoảng cách giữa "bong bóng" và thời gian.
+            int itemBottomMargin = 8; // Khoảng cách dưới cùng của mỗi mục tin nhắn.
+            int avatarSize = 40; // Kích thước avatar (nếu có).
+            int avatarPadding = 5; // Khoảng cách giữa avatar và tin nhắn.
+            int senderNameGap = 5; // Khoảng cách giữa tên người gửi và nội dung tin nhắn.
+
+            // Tạo StringFormat để hỗ trợ xuống dòng và đo kích thước chính xác.
+            StringFormat stringFormat = new StringFormat(StringFormat.GenericTypographic)
+            {
+                FormatFlags = StringFormatFlags.LineLimit | StringFormatFlags.MeasureTrailingSpaces,
+                Trimming = StringTrimming.Word // Cắt từ khi xuống dòng.
+            };
+
+            // Đo kích thước nội dung tin nhắn.
+            float maxWidth = maxBubbleContentWidth - (2 * horizontalBubblePadding); // Chiều rộng tối đa cho nội dung thực tế.
+            float maxContentWidth = 0; // Biến để theo dõi chiều rộng tối đa của nội dung (có thể nhiều dòng).
+            float currentY = 0; // Biến để theo dõi vị trí Y hiện tại khi xử lý nhiều dòng.
+
+            // Tìm kiếm và xử lý các URL trong nội dung tin nhắn để tính toán kích thước và vùng vẽ.
+            MatchCollection matches = UrlRegex.Matches(displayText);
+            int lastIndex = 0; // Theo dõi vị trí cuối cùng đã xử lý trong chuỗi.
+
+            // Duyệt qua tất cả các URL được tìm thấy.
+            foreach (Match match in matches)
+            {
+                // Xử lý phần văn bản trước URL (nếu có).
+                if (match.Index > lastIndex)
+                {
+                    string preUrlText = displayText.Substring(lastIndex, match.Index - lastIndex);
+                    SizeF preUrlSize = g.MeasureString(preUrlText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+                    maxContentWidth = Math.Max(maxContentWidth, preUrlSize.Width);
+                    currentY += preUrlSize.Height; // Tăng chiều cao theo kích thước phần văn bản.
+                }
+
+                // Xử lý URL.
+                string url = match.Value;
+                SizeF urlSize = g.MeasureString(url, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+                maxContentWidth = Math.Max(maxContentWidth, urlSize.Width);
+                // Thêm vùng URL vào danh sách để xử lý sự kiện click sau này.
+                message.UrlRegions.Add(new UrlRegion(new RectangleF(0, currentY, urlSize.Width, urlSize.Height), url));
+                currentY += urlSize.Height; // Tăng chiều cao theo kích thước URL.
+
+                // Cập nhật vị trí cuối cùng đã xử lý.
+                lastIndex = match.Index + match.Length;
+            }
+
+            // Xử lý phần văn bản còn lại sau URL cuối cùng (nếu có).
+            if (lastIndex < displayText.Length)
+            {
+                string remainingText = displayText.Substring(lastIndex);
+                SizeF remainingSize = g.MeasureString(remainingText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+                maxContentWidth = Math.Max(maxContentWidth, remainingSize.Width);
+                currentY += remainingSize.Height; // Tăng chiều cao theo kích thước phần văn bản còn lại.
+            }
+
+            // Lưu kích thước đã tính toán của nội dung tin nhắn.
+            message.CalculatedContentSize = new SizeF(maxContentWidth, currentY);
+
+            // Đo kích thước tên người gửi (nếu có).
+            SizeF senderNameSizeF = new SizeF(0, 0);
+            if (!string.IsNullOrEmpty(senderName))
+            {
+                senderNameSizeF = g.MeasureString(senderName, defaultFont, maxBubbleContentWidth, stringFormat);
+                message.CalculatedSenderNameSize = new SizeF((float)Math.Ceiling(senderNameSizeF.Width), (float)Math.Ceiling(senderNameSizeF.Height));
+            }
+            else
+            {
+                message.CalculatedSenderNameSize = new SizeF(0, 0);
+            }
+
+            // Đo kích thước thời gian gửi tin nhắn.
+            SizeF timestampSizeF = g.MeasureString(message.Timestamp.ToString("HH:mm"), _timestampFont, maxBubbleContentWidth, stringFormat);
+            message.CalculatedTimestampSize = new SizeF((float)Math.Ceiling(timestampSizeF.Width), (float)Math.Ceiling(timestampSizeF.Height));
+
+            // Tính toán kích thước của "bong bóng" tin nhắn.
+            float bubbleWidth = message.CalculatedContentSize.Width + (2 * horizontalBubblePadding);
+            float bubbleHeight = message.CalculatedContentSize.Height + (2 * verticalBubblePadding);
+
+            // Tính toán tổng kích thước của mục tin nhắn trong ListBox.
+            message.CalculatedTotalSize = new SizeF(
+                Math.Max(bubbleWidth, message.CalculatedSenderNameSize.Width) + (message.Avatar != null ? avatarSize + avatarPadding : 0) + 20, // Chiều rộng (có khoảng trống thêm 20)
+                bubbleHeight + timestampBubbleGap + message.CalculatedTimestampSize.Height + itemBottomMargin + (senderNameSizeF.Height > 0 ? senderNameSizeF.Height + senderNameGap : 0) // Chiều cao (tính cả tên người gửi nếu có)
+            );
+        }
+
+
+        public static void DrawMessage(Graphics g, Rectangle bounds, ChatMessage message, DrawItemState state, Font defaultFont, Image avatar)
+        {
+            if (g == null) return;
+
+            try
+            {
+                g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                if (_timestampFont == null)
+                {
+                    Initialize(defaultFont);
+                }
+
+                SolidBrush backgroundBrush = message.IsMyMessage ? MyMessageBackgroundBrush : OtherMessageBackgroundBrush;
+                SolidBrush textBrush = message.IsMyMessage ? MyMessageTextBrush : OtherMessageTextBrush;
+                string displayText = GetFormattedMessageText(message);
+                string senderName = message.IsMyMessage ? "" : message.SenderName;
+
+                SizeF contentSize = message.CalculatedContentSize;
+                SizeF timestampSize = message.CalculatedTimestampSize;
+                SizeF senderNameSize = message.CalculatedSenderNameSize;
+
+                int horizontalBubblePadding = 15;
+                int verticalBubblePadding = 10;
+                int borderRadius = 10;
+                int bubbleMarginFromEdge = 10;
+                int avatarSize = 40;
+                int avatarPadding = 5;
+                int senderNameGap = 5;
+
+                int bubbleWidth = (int)contentSize.Width + (2 * horizontalBubblePadding);
+                int bubbleHeight = (int)contentSize.Height + (2 * verticalBubblePadding);
+
+                RectangleF bubbleRect;
+                RectangleF avatarRect;
+                RectangleF contentRect;
+                RectangleF timestampRect;
+                RectangleF senderNameRect = RectangleF.Empty;
+
+                if (!message.BubbleBounds.IsEmpty && !message.AvatarBounds.IsEmpty)
+                {
+                    bubbleRect = message.BubbleBounds;
+                    avatarRect = message.AvatarBounds;
+                    contentRect = new RectangleF(bubbleRect.X + horizontalBubblePadding, bubbleRect.Y + verticalBubblePadding, contentSize.Width, contentSize.Height);
+                    timestampRect = new RectangleF(
+                        message.IsMyMessage ? bubbleRect.Right - timestampSize.Width : bubbleRect.X,
+                        bubbleRect.Bottom + 2,
+                        timestampSize.Width,
+                        timestampSize.Height);
+                    if (!string.IsNullOrEmpty(senderName))
+                    {
+                        senderNameRect = new RectangleF(
+                            bubbleRect.X,
+                            bubbleRect.Y - senderNameSize.Height - senderNameGap,
+                            senderNameSize.Width,
+                            senderNameSize.Height);
+                    }
+                }
+                else
+                {
+                    if (message.IsMyMessage)
+                    {
+                        bubbleRect = new RectangleF(
+                            bounds.Right - bubbleWidth - bubbleMarginFromEdge - avatarSize - avatarPadding,
+                            bounds.Y, // Sử dụng bounds.Y trực tiếp để vẽ đúng vị trí
+                            bubbleWidth,
+                            bubbleHeight);
+                        avatarRect = new RectangleF(
+                            bubbleRect.Right + avatarPadding,
+                            bounds.Y,
+                            avatarSize,
+                            avatarSize);
+                        contentRect = new RectangleF(
+                            bubbleRect.X + horizontalBubblePadding,
+                            bubbleRect.Y + verticalBubblePadding,
+                            contentSize.Width,
+                            contentSize.Height);
+                        timestampRect = new RectangleF(
+                            bubbleRect.Right - timestampSize.Width,
+                            bubbleRect.Bottom + 2,
+                            timestampSize.Width,
+                            timestampSize.Height);
+                    }
+                    else
+                    {
+                        avatarRect = new RectangleF(
+                            bounds.X + bubbleMarginFromEdge,
+                            bounds.Y,
+                            avatarSize,
+                            avatarSize);
+                        bubbleRect = new RectangleF(
+                            avatarRect.Right + avatarPadding,
+                            bounds.Y + (senderNameSize.Height > 0 ? senderNameSize.Height + senderNameGap : 0),
+                            bubbleWidth,
+                            bubbleHeight);
+                        contentRect = new RectangleF(
+                            bubbleRect.X + horizontalBubblePadding,
+                            bubbleRect.Y + verticalBubblePadding,
+                            contentSize.Width,
+                            contentSize.Height);
+                        timestampRect = new RectangleF(
+                            bubbleRect.X,
+                            bubbleRect.Bottom + 2,
+                            timestampSize.Width,
+                            timestampSize.Height);
+                        if (!string.IsNullOrEmpty(senderName))
+                        {
+                            senderNameRect = new RectangleF(
+                                bubbleRect.X,
+                                bubbleRect.Y - senderNameSize.Height - senderNameGap,
+                                senderNameSize.Width,
+                                senderNameSize.Height);
+                        }
+                    }
+                    message.BubbleBounds = bubbleRect;
+                    message.AvatarBounds = avatarRect;
+                }
+
+                if (!string.IsNullOrEmpty(senderName))
+                {
+                    g.DrawString(senderName, defaultFont, textBrush, senderNameRect, StringFormat.GenericTypographic);
+                }
+
+                if (avatar != null)
+                {
+                    g.DrawImage(avatar, avatarRect);
+                }
+
+                using (GraphicsPath path = RoundedRectangle(Rectangle.Round(bubbleRect), borderRadius))
+                {
+                    g.FillPath(backgroundBrush, path);
+                }
+
+                DrawFormattedText(g, displayText, contentRect, textBrush, defaultFont, message.UrlRegions);
+
+                if (_timestampFont != null)
+                {
+                    g.DrawString(message.Timestamp.ToString("HH:mm"), _timestampFont, TimestampBrush, timestampRect, StringFormat.GenericTypographic);
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                Debug.WriteLine($"Lỗi thiết lập thuộc tính đồ họa: {ex.Message}");
+                g.TextRenderingHint = TextRenderingHint.SystemDefault;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Lỗi vẽ tin nhắn: {ex.Message}");
+            }
+        }
+
+        // Phương thức tạo một đường dẫn đồ họa (GraphicsPath) cho hình chữ nhật bo tròn.
+        private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            if (radius <= 0)
+            {
+                path.AddRectangle(bounds);
+                return path;
+            }
+            int diameter = radius * 2;
+            Rectangle arc = new Rectangle(bounds.X, bounds.Y, diameter, diameter);
+
+            path.AddArc(arc, 180, 90);
+            arc.X = bounds.Right - diameter;
+            path.AddArc(arc, 270, 90);
+            arc.Y = bounds.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+            arc.X = bounds.Left;
+            path.AddArc(arc, 90, 90);
+
+            path.CloseFigure();
+            return path;
+        }
+
+        // Phương thức vẽ văn bản đã được định dạng, bao gồm việc tô màu đặc biệt cho các URL.
+        private static void DrawFormattedText(Graphics g, string text, RectangleF rect, Brush defaultBrush, Font defaultFont, List<UrlRegion> urlRegions)
+        {
+            StringFormat stringFormat = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.LineLimit | StringFormatFlags.MeasureTrailingSpaces, Trimming = StringTrimming.Word };
+
+            MatchCollection matches = UrlRegex.Matches(text);
+            int lastIndex = 0;
+            float currentX = rect.X;
+            float currentY = rect.Y;
+            float maxWidth = rect.Width;
+            int urlRegionIndex = 0;
+
+            foreach (Match match in matches)
+            {
+                // Vẽ phần văn bản trước URL.
+                if (match.Index > lastIndex)
+                {
+                    string preUrlText = text.Substring(lastIndex, match.Index - lastIndex);
+                    SizeF preUrlSize = g.MeasureString(preUrlText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+
+                    RectangleF preUrlRect = new RectangleF(currentX, currentY, maxWidth, preUrlSize.Height);
+                    g.DrawString(preUrlText, defaultFont, defaultBrush, preUrlRect, stringFormat);
+
+                    currentX = rect.X; // Reset X cho dòng tiếp theo
+                    currentY += preUrlSize.Height;
+                }
+
+                // Vẽ URL với màu đặc biệt.
+                if (urlRegionIndex < urlRegions.Count)
+                {
+                    UrlRegion storedUrlRegion = urlRegions[urlRegionIndex];
+                    string url = storedUrlRegion.Url;
+                    SizeF urlSize = g.MeasureString(url, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+
+                    // Lưu tọa độ tương đối của URL so với vùng nội dung.
+                    RectangleF urlBounds = new RectangleF(currentX - rect.X, currentY - rect.Y, urlSize.Width, urlSize.Height);
+                    storedUrlRegion.Bounds = urlBounds;
+                    urlRegions[urlRegionIndex] = storedUrlRegion;
+
+                    RectangleF urlRect = new RectangleF(currentX, currentY, maxWidth, urlSize.Height);
+                    g.DrawString(url, defaultFont, UrlBrush, urlRect, stringFormat);
+
+                    currentX = rect.X; // Reset X cho dòng tiếp theo
+                    currentY += urlSize.Height;
+
+                    urlRegionIndex++;
+                }
+
+                lastIndex = match.Index + match.Length;
+            }
+
+            // Vẽ phần văn bản còn lại sau URL cuối cùng.
+            if (lastIndex < text.Length)
+            {
+                string remainingText = text.Substring(lastIndex);
+                SizeF remainingSize = g.MeasureString(remainingText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
+
+                RectangleF remainingRect = new RectangleF(currentX, currentY, maxWidth, remainingSize.Height);
+                g.DrawString(remainingText, defaultFont, defaultBrush, remainingRect, stringFormat);
+            }
+        }
+    }
+}
