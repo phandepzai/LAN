@@ -254,12 +254,13 @@ namespace Messenger
             }
             else
             {
+                // Invalidate cached sizes for all messages when form resizes
                 foreach (ChatMessage msg in _chatMessages)
                 {
                     msg.CalculatedTotalSize = SizeF.Empty;
                     msg.LastCalculatedWidth = -1;
                 }
-                chatListBox.Refresh();
+                chatListBox.Refresh(); // Force redraw of all items
             }
         }
 
@@ -522,12 +523,16 @@ namespace Messenger
             base.OnFormClosing(e);
             try
             {
-                foreach (var message in _chatMessages)
+                // Only save chat history if the form is actually closing (not just minimizing)
+                if (_isClosing)
                 {
-                    string peerName = message.SenderName == _myUserName ? _currentPeer : message.SenderName;
-                    SaveChatHistory(peerName, message);
+                    foreach (var message in _chatMessages)
+                    {
+                        string peerName = message.SenderName == _myUserName ? _currentPeer : message.SenderName;
+                        SaveChatHistory(peerName, message);
+                    }
                 }
-                _networkService?.Dispose();
+                _networkService?.Dispose(); // Ensure network service is disposed
                 Debug.WriteLine("[OnFormClosing] Đã lưu lịch sử chat và dừng dịch vụ mạng.");
             }
             catch (Exception ex)
@@ -555,7 +560,7 @@ namespace Messenger
             {
                 Debug.WriteLine($"Lỗi phân tích ngày từ tên tệp {filePath}: {ex.Message}");
             }
-            return null; // Trả về null nếu không парсить được ngày
+            return null; // Trả về null nếu không пар解析 được ngày
         }
 
         private void SetPlaceholder()
@@ -642,6 +647,7 @@ namespace Messenger
 
             try
             {
+                // Khởi tạo NetworkService ở đây, sau khi _myUserName đã được xác định
                 _networkService = new NetworkService(_myUserName, TcpPort, MulticastAddress, MulticastPort);
                 _networkService.MessageReceived += NetworkService_MessageReceived;
                 _networkService.PeerDiscovered += NetworkService_PeerDiscovered;
@@ -652,8 +658,9 @@ namespace Messenger
                 UpdateOnlineUsersList();
 
                 Debug.WriteLine("[MainForm_Load] Dọn dẹp lịch sử trò chuyện cũ.");
-                var peerNames = _onlineUsers.Concat(new[] { _myUserName, "Broadcast" }).Distinct();
-                foreach (var peerName in peerNames)
+                // Lấy danh sách các peer đã biết (bao gồm cả _myUserName và "Broadcast") để dọn dẹp lịch sử
+                var knownPeers = _onlineUsers.Concat(new[] { _myUserName, "Broadcast" }).Distinct().ToList();
+                foreach (var peerName in knownPeers)
                 {
                     CleanupOldChatHistory(peerName);
                 }
@@ -668,6 +675,7 @@ namespace Messenger
             catch (Exception ex)
             {
                 MessageBox.Show($"Không thể khởi động dịch vụ mạng.\nLỗi: {ex.Message}", "Lỗi khởi động mạng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // Nếu có lỗi khởi động mạng, đóng ứng dụng
                 ExitApplication();
             }
         }
@@ -800,19 +808,24 @@ namespace Messenger
             }
             else
             {
+                // This block is executed when the form is actually closing (e.g., Application.Exit() is called)
                 _dateTimeTimer?.Stop();
                 _dateTimeTimer?.Dispose();
                 _rainbowTimer?.Stop();
                 _rainbowTimer?.Dispose();
+                _typingTimer?.Stop(); // Stop typing timer
+                _typingTimer?.Dispose(); // Dispose typing timer
+
                 try
                 {
+                    // Save chat history for all messages before disposing network service
                     foreach (var message in _chatMessages)
                     {
                         string peerName = message.IsMyMessage ? _currentPeer : message.SenderName;
                         SaveChatHistory(peerName, message);
                     }
-                    _networkService?.Dispose();
-                    _trayIcon?.Dispose();
+                    _networkService?.Dispose(); // Dispose the network service
+                    _trayIcon?.Dispose(); // Dispose the tray icon
                     Debug.WriteLine("[MainForm_FormClosing] Đã lưu lịch sử chat và giải phóng tài nguyên.");
                 }
                 catch (Exception ex)
@@ -831,7 +844,8 @@ namespace Messenger
                 return;
             }
 
-            if (e.Message.SenderName == _myUserName)
+            // Bỏ qua tin nhắn từ chính mình nếu nó không phải là tin nhắn hệ thống
+            if (e.Message.SenderName == _myUserName && e.Message.Type != ChatMessage.MessageType.System)
             {
                 Debug.WriteLine($"[NetworkService_MessageReceived] Bỏ qua tin nhắn từ chính mình: {e.Message.SenderName}");
                 return;
@@ -840,15 +854,26 @@ namespace Messenger
             string selectedPeer = selectedPeerLabel.Tag as string ?? "Broadcast";
             Debug.WriteLine($"[NetworkService_MessageReceived] Tin nhắn từ {e.Message.SenderName}, Peer đã chọn: {selectedPeer}, nội dung: {e.Message.Content}, ID tin nhắn: {e.Message.MessageId}");
 
-            SaveChatHistory(selectedPeer, e.Message);
+            // Save chat history for the relevant peer
+            // If the message is from me, save it to the current peer's history.
+            // If the message is from another user, save it to their history.
+            string historyPeerName = e.Message.IsMyMessage ? selectedPeer : e.Message.SenderName;
+            SaveChatHistory(historyPeerName, e.Message);
 
-            if (e.Message.SenderName == selectedPeer || selectedPeer == "Broadcast")
+
+            if (e.Message.SenderName == selectedPeer || selectedPeer == "Broadcast" || e.Message.Type == ChatMessage.MessageType.System)
             {
                 if (!_displayedMessageIds.Contains(e.Message.MessageId))
                 {
                     Debug.WriteLine($"[NetworkService_MessageReceived] Hiển thị tin nhắn từ {e.Message.SenderName}");
                     AddMessageToChat(e.Message);
                     _displayedMessageIds.Add(e.Message.MessageId);
+
+                    // NEW LOGIC: Show notification if minimized
+                    if (this.WindowState == FormWindowState.Minimized)
+                    {
+                        ShowNewMessageNotification(e.Message);
+                    }
                 }
                 else
                 {
@@ -883,10 +908,11 @@ namespace Messenger
             Debug.WriteLine($"[HandlePeerDiscovered] Xử lý peer: {e.PeerName}");
             UpdateOnlineUsersList(); // Cập nhật danh sách người dùng trực tuyến
                                      // Nếu có tin nhắn từ peer này trong lịch sử chat hiện tại, tải lại lịch sử
-            if (_chatMessages.Any(m => m.SenderName == e.PeerName))
-            {
-                LoadChatHistory(e.PeerName);
-            }
+                                     // No need to LoadChatHistory here, as it will be loaded when peer is selected
+                                     // if (_chatMessages.Any(m => m.SenderName == e.PeerName))
+                                     // {
+                                     //     LoadChatHistory(e.PeerName);
+                                     // }
         }
 
         // Phương thức cập nhật danh sách người dùng trực tuyến trên giao diện
@@ -950,40 +976,21 @@ namespace Messenger
 
             // Cố gắng tìm một tên mới cho peer vừa ngắt kết nối trong danh sách các peer đang hoạt động.
             // Điều này có thể xảy ra nếu một peer đổi tên và sau đó ngắt kết nối, hoặc có sự trùng lặp IP.
-            string newName = _networkService.GetActivePeerNames().FirstOrDefault(n => !_onlineUsers.Contains(e.PeerName) && n != e.PeerName);
+            // This logic might be problematic if a peer truly disconnects and another peer happens to have the same name.
+            // It's generally better to rely on heartbeats for active status.
+            // string newName = _networkService.GetActivePeerNames().FirstOrDefault(n => !_onlineUsers.Contains(e.PeerName) && n != e.PeerName);
+            // if (!string.IsNullOrEmpty(newName)) { ... } else { ... }
 
-            // Nếu tìm thấy một "tên mới" (tức là một peer khác đang hoạt động mà trước đây có thể đã được gán nhầm hoặc là tên mới của peer cũ)
-            if (!string.IsNullOrEmpty(newName))
+            // Simplified logic: just announce disconnection and switch to Broadcast if the disconnected peer was active
+            if (_currentPeer == e.PeerName)
             {
-                // Cập nhật tên của peer trong các tin nhắn đã hiển thị và trong lịch sử chat
-                UpdateChatMessagesName(e.PeerName, newName);
-                UpdateChatHistoryName(e.PeerName, newName);
-
-                // Nếu peer vừa ngắt kết nối là peer hiện tại đang được chọn để trò chuyện
-                if (_currentPeer == e.PeerName)
-                {
-                    _currentPeer = newName; // Cập nhật peer hiện tại sang tên mới
-                    selectedPeerLabel.Text = $"Đang trò chuyện với: {newName}"; // Cập nhật nhãn hiển thị peer
-                    selectedPeerLabel.Tag = newName; // Cập nhật tag của nhãn
-                    LoadChatHistory(newName); // Tải lịch sử chat của peer với tên mới
-                }
-                // Thêm một tin nhắn hệ thống thông báo rằng peer đã "đổi tên" (trong bối cảnh ngắt kết nối và phát hiện lại)
-                AddMessageToChat(new ChatMessage("Hệ thống", $"{e.PeerName} đã đổi tên thành {newName}", false, ChatMessage.MessageType.System));
+                _currentPeer = "Broadcast"; // Chuyển về chế độ trò chuyện Broadcast
+                selectedPeerLabel.Text = $"Đang trò chuyện với: Broadcast";
+                selectedPeerLabel.Tag = "Broadcast";
+                LoadChatHistory("Broadcast"); // Tải lịch sử chat Broadcast
             }
-            // Nếu không tìm thấy tên mới, có nghĩa là peer đó thực sự đã offline
-            else
-            {
-                // Nếu peer vừa ngắt kết nối là peer hiện tại đang được chọn
-                if (_currentPeer == e.PeerName)
-                {
-                    _currentPeer = "Broadcast"; // Chuyển về chế độ trò chuyện Broadcast
-                    selectedPeerLabel.Text = $"Đang trò chuyện với: Broadcast";
-                    selectedPeerLabel.Tag = "Broadcast";
-                    LoadChatHistory("Broadcast"); // Tải lịch sử chat Broadcast
-                }
-                // Thêm một tin nhắn hệ thống thông báo rằng peer đã ngắt kết nối
-                AddMessageToChat(new ChatMessage("Hệ thống", $"{e.PeerName} đã ngắt kết nối.", false, ChatMessage.MessageType.System));
-            }
+            // Thêm một tin nhắn hệ thống thông báo rằng peer đã ngắt kết nối
+            AddMessageToChat(new ChatMessage("Hệ thống", $"{e.PeerName} đã ngắt kết nối.", false, ChatMessage.MessageType.System));
         }
 
         // Phương thức xử lý sự kiện khi nhận được trạng thái "đang gõ" từ dịch vụ mạng
@@ -1092,16 +1099,18 @@ namespace Messenger
                 // Gửi trạng thái gõ đến Broadcast hoặc peer cụ thể
                 if (selectedPeer == "Broadcast")
                 {
-                    await _networkService.SendTypingStatus(_myUserName, isTyping, true);
+                    await _networkService.SendTypingStatus(_myUserName, isTyping, true).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _networkService.SendTypingStatus(_myUserName, isTyping, false, selectedPeer);
+                    await _networkService.SendTypingStatus(_myUserName, isTyping, false, selectedPeer).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Lỗi gửi trạng thái typing: {ex.Message}");
+                // Optionally, show a message box for critical errors
+                // MessageBox.Show($"Không thể gửi trạng thái gõ: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1225,13 +1234,13 @@ namespace Messenger
                 if (selectedPeer == "Broadcast")
                 {
                     Debug.WriteLine($"[sendButton_Click] Gửi phát sóng: {messageText}");
-                    await _networkService.SendMulticastMessage(messageText); // Gửi tin nhắn Broadcast
+                    await _networkService.SendMulticastMessage(messageText).ConfigureAwait(false); // Gửi tin nhắn Broadcast
                     Debug.WriteLine($"[sendButton_Click] Đã gửi phát sóng thành công");
                 }
                 else
                 {
                     Debug.WriteLine($"[sendButton_Click] Gửi đến {selectedPeer}: {messageText}");
-                    await _networkService.SendMessageToPeer(selectedPeer, messageText); // Gửi tin nhắn đến một peer cụ thể
+                    await _networkService.SendMessageToPeer(selectedPeer, messageText).ConfigureAwait(false); // Gửi tin nhắn đến một peer cụ thể
                     Debug.WriteLine($"[sendButton_Click] Tin nhắn đã được gửi thành công tới {selectedPeer}");
                 }
             }
@@ -1252,13 +1261,30 @@ namespace Messenger
                 MessageBox.Show(errorMsg, "Lỗi Gửi Tin Nhắn", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 AddMessageToChat(new ChatMessage("Hệ thống", errorMsg, false, ChatMessage.MessageType.Error));
             }
-
-            // Sau khi gửi, làm sạch hộp nhập và đặt lại trạng thái
-            messageTextBox.Clear();
-            SetPlaceholder();
-            _typingTimer.Stop();
-            _isTyping = false;
-            SendTypingStatus(false); // Gửi trạng thái ngừng gõ
+            finally
+            {
+                // Sau khi gửi, làm sạch hộp nhập và đặt lại trạng thái
+                // Đảm bảo các thao tác UI này được thực hiện trên luồng UI chính
+                if (messageTextBox.InvokeRequired)
+                {
+                    messageTextBox.Invoke(new MethodInvoker(() =>
+                    {
+                        messageTextBox.Clear();
+                        SetPlaceholder();
+                        _typingTimer.Stop();
+                        _isTyping = false;
+                        SendTypingStatus(false); // Gửi trạng thái ngừng gõ
+                    }));
+                }
+                else
+                {
+                    messageTextBox.Clear();
+                    SetPlaceholder();
+                    _typingTimer.Stop();
+                    _isTyping = false;
+                    SendTypingStatus(false); // Gửi trạng thái ngừng gõ
+                }
+            }
         }
         private void messageTextBox_KeyDown(object sender, KeyEventArgs e)
         {
@@ -1463,7 +1489,8 @@ namespace Messenger
 
             if (index != ListBox.NoMatches && index < _chatMessages.Count)
             {
-                ChatMessage message = _chatMessages[index];
+                ChatMessage message = chatListBox.Items[index] as ChatMessage;
+                if (message == null) return;
                 Rectangle itemBounds = chatListBox.GetItemRectangle(index);
                 int horizontalBubblePadding = 15;
                 int verticalBubblePadding = 10;
@@ -1530,6 +1557,38 @@ namespace Messenger
 
             // Thay đổi con trỏ chuột dựa trên việc có đang di chuột qua URL hay không
             chatListBox.Cursor = isOverUrl ? Cursors.Hand : Cursors.Default;
+        }
+
+        // Phương thức hiển thị thông báo tin nhắn mới khi ứng dụng ở chế độ thu nhỏ
+        private void ShowNewMessageNotification(ChatMessage message)
+        {
+            // Kiểm tra xem biểu tượng khay hệ thống hoặc biểu tượng form có null không
+            if (_trayIcon == null || this.Icon == null)
+            {
+                Debug.WriteLine("[ShowNewMessageNotification] Tray icon hoặc biểu tượng form là null. Không thể hiển thị thông báo.");
+                return;
+            }
+
+            string title = message.SenderName;
+            string content = message.Content;
+
+            // Giới hạn độ dài nội dung để tránh thông báo quá dài
+            if (content.Length > 100) // Ví dụ: giới hạn 100 ký tự
+            {
+                content = content.Substring(0, 97) + "...";
+            }
+
+            // Tạo một CustomBalloonForm mới
+            var balloon = new CustomBalloonForm(
+                title,
+                content,
+                this.Icon, // Sử dụng biểu tượng của form
+                5000,      // Hiển thị trong 5 giây
+                () => RestoreFromTray() // Hành động khi nhấp vào: khôi phục form
+            );
+            // Hiển thị thông báo từ dưới lên
+            balloon.ShowFromBottom(title, content, this.Icon);
+            Debug.WriteLine($"[ShowNewMessageNotification] Đã hiển thị thông báo tin nhắn mới từ {message.SenderName}.");
         }
     }
 }

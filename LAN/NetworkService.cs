@@ -118,7 +118,7 @@ namespace Messenger
     // Lớp cung cấp các dịch vụ mạng cho ứng dụng chat.
     public class NetworkService : IDisposable
     {
-        private readonly UdpClient _udpClient;
+        private UdpClient _udpClient; // Removed readonly to allow re-initialization if needed, though Dispose should prevent it.
         private TcpListener _tcpListener;
         private string _localUserName;
         private int _tcpPort;
@@ -157,12 +157,33 @@ namespace Messenger
             _localUserName = userName;
             _multicastAddress = IPAddress.Parse(multicastAddress);
             _multicastPort = multicastPort;
+            _cancellationTokenSource = new CancellationTokenSource();
+            _activePeers = new ConcurrentDictionary<string, PeerInfo>();
 
             // Khởi tạo UdpClient và cấu hình để sử dụng lại địa chỉ và lắng nghe trên cổng multicast.
-            _udpClient = new UdpClient();
-            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _multicastPort));
-            _udpClient.JoinMulticastGroup(_multicastAddress);
+            try
+            {
+                _udpClient = new UdpClient(); // Initialize UdpClient
+                _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _multicastPort));
+                _udpClient.JoinMulticastGroup(_multicastAddress);
+                Debug.WriteLine($"[NetworkService] UdpClient đã khởi tạo và tham gia nhóm multicast: {_multicastAddress}:{_multicastPort}");
+            }
+            catch (SocketException ex)
+            {
+                Debug.WriteLine($"[NetworkService] Lỗi khi khởi tạo UdpClient hoặc tham gia multicast group: {ex.Message}");
+                // Nếu UdpClient không thể khởi tạo, đặt nó về null để tránh sử dụng đối tượng lỗi.
+                _udpClient?.Close();
+                _udpClient = null;
+                throw new InvalidOperationException("Không thể khởi tạo dịch vụ UDP. Vui lòng kiểm tra cấu hình mạng hoặc quyền.", ex);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[NetworkService] Lỗi không xác định khi khởi tạo UdpClient: {ex.Message}");
+                _udpClient?.Close();
+                _udpClient = null;
+                throw;
+            }
 
             // Khởi tạo và bắt đầu TcpListener.
             try
@@ -176,7 +197,7 @@ namespace Messenger
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
                 Debug.WriteLine($"[NetworkService] Cổng TCP {tcpPort} đang được sử dụng, chọn cổng ngẫu nhiên");
-                _tcpListener = new TcpListener(IPAddress.Any, 0);
+                _tcpListener = new TcpListener(IPAddress.Any, 0); // Try with port 0 for dynamic assignment
                 _tcpListener.Start();
                 _tcpPort = ((IPEndPoint)_tcpListener.LocalEndpoint).Port;
                 Debug.WriteLine($"[NetworkService] Đang sử dụng cổng TCP ngẫu nhiên: {_tcpPort}");
@@ -185,10 +206,43 @@ namespace Messenger
             catch (Exception ex)
             {
                 Debug.WriteLine($"[NetworkService] Lỗi khi khởi động TCP Listener: {ex.Message}");
-                throw;
+                _tcpListener?.Stop(); // Ensure listener is stopped if it failed to start
+                _tcpListener = null;
+                throw new InvalidOperationException("Không thể khởi động dịch vụ TCP. Vui lòng kiểm tra cấu hình mạng hoặc quyền.", ex);
             }
-            // Khởi tạo ConcurrentDictionary để lưu trữ thông tin về các peer đang hoạt động.
-            _activePeers = new ConcurrentDictionary<string, PeerInfo>();
+        }
+
+        /// <summary>
+        /// Ensures the UdpClient is initialized and ready for use.
+        /// If it's null, not bound, or disposed, it attempts to re-initialize it.
+        /// </summary>
+        private void EnsureUdpClientInitialized()
+        {
+            // Kiểm tra xem UdpClient có đang ở trạng thái hợp lệ hay không.
+            // Nếu không, cố gắng khởi tạo lại.
+            if (_udpClient == null || _udpClient.Client == null || !_udpClient.Client.IsBound)
+            {
+                Debug.WriteLine("[NetworkService] UdpClient không khả dụng. Đang cố gắng khởi tạo lại.");
+                try
+                {
+                    // Đóng và giải phóng UdpClient hiện có (nếu có) trước khi khởi tạo lại.
+                    _udpClient?.Close();
+                    _udpClient?.Dispose();
+                    _udpClient = new UdpClient(); // Khởi tạo một UdpClient mới.
+                    _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true); // Cho phép sử dụng lại địa chỉ.
+                    _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, _multicastPort)); // Bind đến cổng multicast.
+                    _udpClient.JoinMulticastGroup(_multicastAddress); // Tham gia nhóm multicast.
+                    Debug.WriteLine($"[NetworkService] UdpClient đã khởi tạo lại và tham gia nhóm multicast: {_multicastAddress}:{_multicastPort}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[NetworkService] Lỗi khi khởi tạo lại UdpClient: {ex.Message}");
+                    _udpClient?.Close(); // Đảm bảo đóng nếu có lỗi.
+                    _udpClient = null; // Đặt về null nếu khởi tạo lại thất bại.
+                    // Ném lại ngoại lệ để thông báo lỗi cho luồng gọi.
+                    throw new InvalidOperationException("Không thể khởi tạo lại dịch vụ UDP.", ex);
+                }
+            }
         }
 
         // Cập nhật tên người dùng cục bộ.
@@ -241,7 +295,8 @@ namespace Messenger
             }
 
             // Gửi thông báo cập nhật tên đến các peer khác
-            Task.Run(() => SendNameUpdate(oldUserName, newUserName)).GetAwaiter().GetResult();
+            // Sử dụng Task.Run và await để tránh block luồng gọi
+            Task.Run(async () => await SendNameUpdate(oldUserName, newUserName)).ConfigureAwait(false);
 
             // Xóa các tin nhắn broadcast cũ từ tên cũ
             lock (_processedBroadcastMessageIds)
@@ -254,23 +309,36 @@ namespace Messenger
         {
             try
             {
+                EnsureUdpClientInitialized(); // Ensure UDP client is ready
                 string message = $"NAME_UPDATE:{oldName}:{newName}";
                 byte[] data = Encoding.UTF8.GetBytes(message);
-                await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort));
-                Debug.WriteLine($"[NetworkService] Đã gửi NAME_UPDATE: {oldName} -> {newName}");
+                if (_udpClient != null)
+                {
+                    await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort)).ConfigureAwait(false);
+                    Debug.WriteLine($"[NetworkService] Đã gửi NAME_UPDATE: {oldName} -> {newName}");
+                }
+                else
+                {
+                    Debug.WriteLine("[NetworkService] Không thể gửi NAME_UPDATE: UdpClient không khả dụng sau khi khởi tạo lại.");
+                }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[NetworkService] Lỗi gửi NAME_UPDATE: {ex.Message}");
-                throw;
+                throw; // Re-throw to propagate the exception
             }
         }
 
         public void Start()
         {
-            _cancellationTokenSource = new CancellationTokenSource();
+            // Ensure cancellation token source is not disposed from previous runs
+            if (_cancellationTokenSource.IsCancellationRequested)
+            {
+                _cancellationTokenSource = new CancellationTokenSource();
+            }
             var cancellationToken = _cancellationTokenSource.Token;
 
+            // Re-check TCP listener state and start if necessary
             if (_tcpListener == null || !_tcpListener.Server.IsBound)
             {
                 try
@@ -278,6 +346,7 @@ namespace Messenger
                     if (_tcpListener == null) _tcpListener = new TcpListener(IPAddress.Any, _tcpPort);
                     _tcpListener.Start();
                     _tcpPort = ((IPEndPoint)_tcpListener.LocalEndpoint).Port;
+                    Debug.WriteLine($"[NetworkService] TCP Listener đã khởi động lại trên cổng: {_tcpPort}");
                 }
                 catch (Exception ex)
                 {
@@ -286,10 +355,23 @@ namespace Messenger
                 }
             }
 
-            _udpListenTask = Task.Run(() => ListenForUdpMessages(cancellationToken), cancellationToken);
-            _tcpListenTask = Task.Run(() => ListenForTcpConnections(cancellationToken), cancellationToken);
-            _heartbeatTask = Task.Run(() => SendHeartbeatPeriodically(cancellationToken), cancellationToken);
-            _peerCleanupTask = Task.Run(() => CleanupDisconnectedPeers(cancellationToken), cancellationToken);
+            // Ensure UDP client is initialized at startup
+            try
+            {
+                EnsureUdpClientInitialized();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[NetworkService] Lỗi khi khởi tạo UdpClient trong Start(): {ex.Message}");
+                // Không ném ngoại lệ ở đây vì nó có thể đã được ném trong constructor.
+                // Nếu UdpClient không khởi tạo được, các tác vụ liên quan đến UDP sẽ tự xử lý.
+            }
+
+            // Start tasks and store them
+            _udpListenTask = ListenForUdpMessages(cancellationToken);
+            _tcpListenTask = ListenForTcpConnections(cancellationToken);
+            _heartbeatTask = SendHeartbeatPeriodically(cancellationToken);
+            _peerCleanupTask = CleanupDisconnectedPeers(cancellationToken);
 
             var localEp = _tcpListener.LocalEndpoint as IPEndPoint;
             if (localEp != null)
@@ -302,10 +384,11 @@ namespace Messenger
                         existingInfo.LastHeartbeat = DateTime.UtcNow;
                         return existingInfo;
                     });
+                Debug.WriteLine($"[NetworkService] Đã thêm/cập nhật người dùng cục bộ '{_localUserName}' vào active peers.");
             }
             else
             {
-                Debug.WriteLine("[NetworkService] Cảnh báo: Không thể lấy IPEndPoint cục bộ để thêm vào active peers.");
+                Debug.WriteLine("[NetworkService] Cảnh báo: Không thể lấy IPEndPoint cục bộ để thêm vào active peers. Sử dụng Loopback.");
                 _activePeers.AddOrUpdate(_localUserName,
                     new PeerInfo(_localUserName, new IPEndPoint(IPAddress.Loopback, _tcpPort), true),
                     (key, existingInfo) =>
@@ -335,7 +418,7 @@ namespace Messenger
                 {
                     Debug.WriteLine($"[SendMessageToPeer] Không có hoạt động kết nối tới {peerName}. Đang cố gắng kết nối...");
                     // Cố gắng thiết lập kết nối đến peer
-                    await ConnectToPeer(peerInfo);
+                    await ConnectToPeer(peerInfo).ConfigureAwait(false);
                 }
 
                 // Nếu đã có kết nối TCP hợp lệ
@@ -356,9 +439,9 @@ namespace Messenger
 
                         Debug.WriteLine($"[SendMessageToPeer] Gửi đến {peerName}: {messageToSend}");
                         // Gửi độ dài của tin nhắn trước
-                        await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length);
+                        await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
                         // Sau đó gửi nội dung tin nhắn
-                        await stream.WriteAsync(contentBytes, 0, contentBytes.Length);
+                        await stream.WriteAsync(contentBytes, 0, contentBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
                         Debug.WriteLine($"[SendMessageToPeer] Đã gửi thành công đến {peerName}");
                     }
                     catch (SocketException se)
@@ -368,6 +451,12 @@ namespace Messenger
                         // Đánh dấu peer là đã ngắt kết nối
                         MarkPeerDisconnected(peerInfo.UserName);
                         throw new InvalidOperationException($"Không thể gửi tin nhắn đến {peerName}: {se.Message}", se);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Debug.WriteLine($"[SendMessageToPeer] Gửi tin nhắn đến {peerName} đã bị hủy.");
+                        MarkPeerDisconnected(peerInfo.UserName);
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -397,14 +486,26 @@ namespace Messenger
         {
             try
             {
+                EnsureUdpClientInitialized(); // Ensure UDP client is ready
+                if (_udpClient == null)
+                {
+                    Debug.WriteLine("[SendMulticastMessage] Không thể gửi: UdpClient đã bị giải phóng hoặc chưa khởi tạo sau khi khởi tạo lại.");
+                    throw new InvalidOperationException("Không thể gửi tin nhắn Broadcast: Dịch vụ UDP không khả dụng.");
+                }
+
                 // Tạo nội dung tin nhắn broadcast theo định dạng: BROADCAST:{Tên người gửi}:{MessageId}:{Nội dung tin nhắn}
                 string message = $"BROADCAST:{_localUserName}:{Guid.NewGuid()}:{messageContent}";
                 // Chuyển nội dung tin nhắn thành mảng byte theo encoding UTF8
                 byte[] data = Encoding.UTF8.GetBytes(message);
                 Debug.WriteLine($"[SendMulticastMessage] Gửi: {message} đến {_multicastAddress}:{_multicastPort}");
                 // Gửi tin nhắn đến địa chỉ multicast và port
-                await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort));
+                await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort)).ConfigureAwait(false);
                 Debug.WriteLine($"[SendMulticastMessage] Đã gửi thành công đến {_multicastAddress}:{_multicastPort}");
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Debug.WriteLine($"[SendMulticastMessage] Lỗi ObjectDisposedException khi gửi broadcast: {ex.Message}");
+                throw new InvalidOperationException($"Không thể gửi tin nhắn Broadcast: Dịch vụ UDP đã bị giải phóng. Lỗi: {ex.Message}", ex);
             }
             catch (SocketException se)
             {
@@ -432,10 +533,20 @@ namespace Messenger
             {
                 try
                 {
+                    EnsureUdpClientInitialized(); // Ensure UDP client is ready
+                    if (_udpClient == null)
+                    {
+                        Debug.WriteLine("[SendTypingStatus] Không thể gửi broadcast typing status: UdpClient không khả dụng sau khi khởi tạo lại.");
+                        return;
+                    }
                     // Chuyển nội dung tin nhắn thành mảng byte theo encoding UTF8
                     byte[] data = Encoding.UTF8.GetBytes(messageContent);
                     // Gửi tin nhắn đến địa chỉ multicast và port
-                    await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort));
+                    await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort)).ConfigureAwait(false);
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    Debug.WriteLine($"[SendTypingStatus] Lỗi ObjectDisposedException khi gửi broadcast typing status: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
@@ -451,7 +562,7 @@ namespace Messenger
                 // Kiểm tra và kết nối đến peer nếu chưa có kết nối
                 if (peerInfo.TcpClient == null || !peerInfo.TcpClient.Connected)
                 {
-                    await ConnectToPeer(peerInfo);
+                    await ConnectToPeer(peerInfo).ConfigureAwait(false);
                 }
 
                 // Nếu đã có kết nối TCP hợp lệ
@@ -467,8 +578,19 @@ namespace Messenger
                         byte[] lengthBytes = BitConverter.GetBytes(contentBytes.Length);
 
                         // Gửi độ dài và nội dung tin nhắn
-                        await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length);
-                        await stream.WriteAsync(contentBytes, 0, contentBytes.Length);
+                        await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
+                        await stream.WriteAsync(contentBytes, 0, contentBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        Debug.WriteLine($"[SendTypingStatus] Lỗi ObjectDisposedException khi gửi typing status đến {targetPeer}: {ex.Message}");
+                        MarkPeerDisconnected(peerInfo.UserName);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Debug.WriteLine($"[SendTypingStatus] Gửi typing status đến {targetPeer} đã bị hủy.");
+                        MarkPeerDisconnected(peerInfo.UserName);
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -486,8 +608,16 @@ namespace Messenger
             {
                 try
                 {
+                    // Đảm bảo UdpClient được khởi tạo trước khi lắng nghe
+                    EnsureUdpClientInitialized();
+                    if (_udpClient == null || _udpClient.Client == null || !_udpClient.Client.IsBound)
+                    {
+                        Debug.WriteLine("[NetworkService] UdpClient không khả dụng hoặc chưa được bind trong ListenForUdpMessages. Đang chờ...");
+                        await Task.Delay(1000, cancellationToken).ConfigureAwait(false); // Wait before retrying
+                        continue;
+                    }
                     // Nhận dữ liệu UDP bất đồng bộ với hỗ trợ hủy bỏ
-                    UdpReceiveResult result = await _udpClient.ReceiveAsync().WithCancellation(cancellationToken);
+                    UdpReceiveResult result = await _udpClient.ReceiveAsync().WithCancellation(cancellationToken).ConfigureAwait(false);
                     // Chuyển dữ liệu byte nhận được thành chuỗi UTF8, loại bỏ các ký tự null ở cuối
                     string message = Encoding.UTF8.GetString(result.Buffer, 0, result.Buffer.Length).TrimEnd('\0');
                     // Xử lý tin nhắn UDP nhận được
@@ -496,21 +626,30 @@ namespace Messenger
                 catch (OperationCanceledException)
                 {
                     // Xử lý trường hợp thao tác bị hủy bỏ (do CancellationToken)
+                    Debug.WriteLine("[NetworkService] ListenForUdpMessages đã bị hủy.");
                     break;
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    // Xử lý trường hợp UdpClient đã bị giải phóng
+                    Debug.WriteLine($"[NetworkService] Lỗi ObjectDisposedException trong ListenForUdpMessages: {ex.Message}");
+                    _udpClient = null; // Đặt về null để buộc khởi tạo lại
+                    // Không break ở đây để cho phép vòng lặp thử khởi tạo lại UdpClient
+                    await Task.Delay(1000, cancellationToken).ConfigureAwait(false); // Chờ trước khi thử lại
                 }
                 catch (SocketException se)
                 {
                     // Xử lý lỗi socket trong quá trình lắng nghe UDP
                     Debug.WriteLine($"[NetworkService] Lỗi Socket trong ListenForUdpMessages: {se.Message} (Mã lỗi: {se.SocketErrorCode})");
                     // Nếu không có yêu cầu hủy bỏ, đợi một chút trước khi tiếp tục lắng nghe
-                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     // Xử lý các lỗi khác trong quá trình lắng nghe UDP
                     Debug.WriteLine($"[NetworkService] Lỗi trong ListenForUdpMessages: {ex.Message}");
                     // Nếu không có yêu cầu hủy bỏ, đợi một chút trước khi tiếp tục lắng nghe
-                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -524,6 +663,7 @@ namespace Messenger
             // Bỏ qua tin nhắn từ chính mình hoặc từ tên cũ trong vòng 15 giây sau khi đổi tên
             if ((potentialSenderName == _localUserName ||
                  (potentialSenderName == _previousLocalUserNameForHeartbeatIgnore &&
+                  _previousLocalUserNameForHeartbeatIgnore != _localUserName &&
                   (DateTime.UtcNow - _lastRenameTimeForHeartbeatIgnore).TotalSeconds < HeartbeatIgnoreDurationSeconds)) &&
                 !message.StartsWith("HEARTBEAT:"))
             {
@@ -553,7 +693,7 @@ namespace Messenger
                     Debug.WriteLine($"[ProcessUdpMessage] Định dạng HEARTBEAT không hợp lệ: {message}");
                 }
             }
-            if (message.StartsWith("BROADCAST:"))
+            else if (message.StartsWith("BROADCAST:"))
             {
                 Debug.WriteLine($"[ProcessUdpMessage] Nhận BROADCAST: {message} từ {remoteEndPoint}");
                 var parts = message.Split(new[] { ':' }, 4);
@@ -681,9 +821,9 @@ namespace Messenger
                     if (!existingPeer.EndPoint.Equals(peerServiceEndPoint))
                     {
                         Debug.WriteLine($"[HandlePeerHeartbeat] Người dùng {peerName} đã thay đổi lần cuối từ {existingPeer.EndPoint} đến {peerServiceEndPoint}");
-                        existingPeer.EndPoint = peerServiceEndPoint;
-                        existingPeer.TcpClient?.Close();
-                        existingPeer.SetTcpClient(null);
+                        existingPeer.TcpClient?.Close(); // Close old TCP client if endpoint changed
+                        existingPeer.SetTcpClient(null); // Clear TCP client to force re-connection
+                        existingPeer.EndPoint = peerServiceEndPoint; // Update endpoint after closing old client
                     }
                     return existingPeer;
                 }
@@ -710,18 +850,26 @@ namespace Messenger
                 try
                 {
                     // Chấp nhận một kết nối TCP client đến một cách bất đồng bộ
-                    TcpClient client = await _tcpListener.AcceptTcpClientAsync(cancellationToken);
+                    TcpClient client = await _tcpListener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
                     // Nếu có một client kết nối thành công
                     if (client != null)
                     {
                         Debug.WriteLine($"[NetworkService] Đã chấp nhận kết nối TCP từ {client.Client.RemoteEndPoint}");
                         // Xử lý client trên một task riêng để không block luồng chính
-                        _ = Task.Run(() => HandleIncomingTcpClient(client, cancellationToken), cancellationToken);
+                        _ = Task.Run(() => HandleIncomingTcpClient(client, cancellationToken), cancellationToken).ConfigureAwait(false);
                     }
                 }
                 catch (OperationCanceledException)
                 {
-                    // Xử lý trường hợp task bị hủy bỏ (do cancellationToken)
+                    // Xử lý trường hợp task bị hủy bỏ (do CancellationToken)
+                    Debug.WriteLine("[NetworkService] ListenForTcpConnections đã bị hủy.");
+                    break;
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    Debug.WriteLine($"[NetworkService] Lỗi ObjectDisposedException trong ListenForTcpConnections: {ex.Message}");
+                    // Nếu TcpListener bị dispose, chúng ta không thể tiếp tục lắng nghe.
+                    // Cần xử lý việc khởi động lại TcpListener nếu muốn tiếp tục.
                     break;
                 }
                 catch (SocketException se) when (se.SocketErrorCode == SocketError.Interrupted || se.SocketErrorCode == SocketError.OperationAborted)
@@ -734,7 +882,7 @@ namespace Messenger
                 {
                     // Xử lý các lỗi khác có thể xảy ra trong quá trình chấp nhận kết nối
                     Debug.WriteLine($"[NetworkService] Lỗi trong ListenForTcpConnections: {ex.Message}");
-                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -752,10 +900,8 @@ namespace Messenger
                 Debug.WriteLine($"[NetworkService] Đã chấp nhận kết nối TCP từ {remoteEndPoint}");
 
                 // Sử dụng các khối using để đảm bảo tài nguyên được giải phóng khi không còn sử dụng
-                using (client)
+                using (client) // client will be disposed when exiting this block
                 using (var stream = client.GetStream())
-                using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-                using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
                     // Lặp lại cho đến khi có yêu cầu hủy bỏ hoặc client ngắt kết nối
                     while (!cancellationToken.IsCancellationRequested && client.Connected)
@@ -766,53 +912,34 @@ namespace Messenger
                             if (stream.DataAvailable)
                             {
                                 // Đọc độ dài của tin nhắn (được gửi trước nội dung)
-                                int length = reader.ReadInt32();
+                                byte[] lengthBytes = new byte[4];
+                                int bytesRead = await stream.ReadAsync(lengthBytes, 0, 4, cancellationToken).ConfigureAwait(false);
+                                if (bytesRead != 4)
+                                {
+                                    Debug.WriteLine($"[HandleIncomingTcpClient] Không đọc đủ 4 byte độ dài từ {remoteEndPoint}.");
+                                    break; // Connection likely closed
+                                }
+                                int length = BitConverter.ToInt32(lengthBytes, 0);
+
                                 // Đọc nội dung tin nhắn dựa trên độ dài đã đọc
-                                byte[] buffer = reader.ReadBytes(length);
+                                byte[] buffer = new byte[length];
+                                bytesRead = await stream.ReadAsync(buffer, 0, length, cancellationToken).ConfigureAwait(false);
+                                if (bytesRead != length)
+                                {
+                                    Debug.WriteLine($"[HandleIncomingTcpClient] Không đọc đủ nội dung tin nhắn từ {remoteEndPoint}.");
+                                    break; // Connection likely closed
+                                }
                                 // Chuyển buffer byte thành chuỗi UTF8
                                 string message = Encoding.UTF8.GetString(buffer);
 
-                                // Xử lý tin nhắn CHAT
-                                var parts = message.Split(new[] { ':' }, 4);
-                                if (parts.Length == 4 && parts[0] == "CHAT")
-                                {
-                                    Debug.WriteLine($"[HandleIncomingTcpClient] Đã nhận CHAT từ {remoteEndPoint}: {message}");
-                                    string senderName = parts[1];
-                                    if (Guid.TryParse(parts[2], out Guid messageId))
-                                    {
-                                        string content = parts[3];
-                                        // Kiểm tra xem đã xử lý tin nhắn này chưa (tránh trùng lặp)
-                                        if (!processedMessageIds.Contains(messageId))
-                                        {
-                                            Debug.WriteLine($"[HandleIncomingTcpClient] Xử lý CHAT từ {senderName}: {content}");
-                                            // Gọi hàm xử lý tin nhắn TCP
-                                            ProcessTcpMessage(message, remoteEndPoint, client, associatedPeerName);
-                                            processedMessageIds.Add(messageId);
-                                        }
-                                        else
-                                        {
-                                            Debug.WriteLine($"[HandleIncomingTcpClient] Bỏ qua CHAT trùng lặp (MessageId: {messageId}) từ {senderName}");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Debug.WriteLine($"[HandleIncomingTcpClient] MessageId không hợp lệ trong CHAT: {parts[2]}");
-                                    }
-                                }
-                                else
-                                {
-                                    Debug.WriteLine($"[NetworkService] Định dạng tin nhắn TCP không hợp lệ từ {remoteEndPoint}: {message}");
-                                }
-
-                                // Xác định tên peer liên kết nếu tin nhắn bắt đầu bằng "USERNAME:" (tin nhắn HELLO cũ)
-                                if (associatedPeerName == null && message.StartsWith("USERNAME:"))
-                                {
-                                    associatedPeerName = message.Substring("USERNAME:".Length);
-                                    Debug.WriteLine($"[NetworkService] Tên người liên kết cho {remoteEndPoint}: {associatedPeerName}");
-                                }
+                                // Xử lý tin nhắn
+                                ProcessTcpMessage(message, remoteEndPoint, client, ref associatedPeerName, processedMessageIds);
                             }
-                            // Chờ một khoảng thời gian ngắn để không chiếm dụng CPU
-                            await Task.Delay(100, cancellationToken);
+                            else
+                            {
+                                // Chờ một khoảng thời gian ngắn để không chiếm dụng CPU
+                                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                            }
                         }
                         catch (IOException ex) when (ex.InnerException is SocketException se && se.SocketErrorCode == SocketError.ConnectionReset)
                         {
@@ -823,6 +950,12 @@ namespace Messenger
                         catch (OperationCanceledException)
                         {
                             // Xử lý trường hợp task bị hủy bỏ
+                            Debug.WriteLine($"[NetworkService] HandleIncomingTcpClient đã bị hủy cho {remoteEndPoint}.");
+                            break;
+                        }
+                        catch (ObjectDisposedException ex)
+                        {
+                            Debug.WriteLine($"[NetworkService] Lỗi ObjectDisposedException trong HandleIncomingTcpClient cho {remoteEndPoint}: {ex.Message}");
                             break;
                         }
                         catch (Exception ex)
@@ -838,10 +971,15 @@ namespace Messenger
             {
                 // Đảm bảo log khi kết nối TCP bị đóng
                 Debug.WriteLine($"[NetworkService] Đã đóng kết nối TCP với {remoteEndPoint} (Người dùng: {associatedPeerName})");
+                // Mark peer as disconnected if it was associated with a name
+                if (associatedPeerName != null)
+                {
+                    MarkPeerDisconnected(associatedPeerName);
+                }
             }
         }
 
-        private string ProcessTcpMessage(string message, IPEndPoint remoteEndPoint, TcpClient client, string currentAssociatedPeer)
+        private string ProcessTcpMessage(string message, IPEndPoint remoteEndPoint, TcpClient client, ref string currentAssociatedPeer, HashSet<Guid> processedMessageIds)
         {
             string identifiedSenderName = currentAssociatedPeer;
 
@@ -851,26 +989,47 @@ namespace Messenger
                 if (parts.Length == 4)
                 {
                     string senderName = parts[1];
-                    identifiedSenderName = senderName;
-                    string content = parts[3];
-                    if (senderName == _localUserName)
+                    identifiedSenderName = senderName; // Update associated peer name
+                    if (Guid.TryParse(parts[2], out Guid messageId))
                     {
-                        Debug.WriteLine($"[ProcessTcpMessage] Bỏ qua tin nhắn CHAT từ chính mình: {senderName}");
-                        return identifiedSenderName;
-                    }
-                    OnMessageReceived(new ChatMessage(senderName, content, false));
-
-                    if (_activePeers.TryGetValue(senderName, out PeerInfo peerInfo))
-                    {
-                        if (peerInfo.TcpClient != client)
+                        string content = parts[3];
+                        if (senderName == _localUserName)
                         {
-                            peerInfo.SetTcpClient(client);
-                            Debug.WriteLine($"[NetworkService] Đã liên kết client TCP từ {remoteEndPoint} với người dùng {senderName}.");
+                            Debug.WriteLine($"[ProcessTcpMessage] Bỏ qua tin nhắn CHAT từ chính mình: {senderName}");
+                            return identifiedSenderName;
+                        }
+                        if (!processedMessageIds.Contains(messageId))
+                        {
+                            OnMessageReceived(new ChatMessage(senderName, content, false, messageId));
+                            processedMessageIds.Add(messageId);
+                            Debug.WriteLine($"[ProcessTcpMessage] Xử lý CHAT từ {senderName}: {content}");
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[ProcessTcpMessage] Bỏ qua CHAT trùng lặp (MessageId: {messageId}) từ {senderName}");
+                        }
+
+                        if (_activePeers.TryGetValue(senderName, out PeerInfo peerInfo))
+                        {
+                            if (peerInfo.TcpClient != client)
+                            {
+                                peerInfo.SetTcpClient(client);
+                                Debug.WriteLine($"[NetworkService] Đã liên kết client TCP từ {remoteEndPoint} với người dùng {senderName}.");
+                            }
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[NetworkService] Đã nhận TCP CHAT từ peer không xác định {senderName} tại {remoteEndPoint}. Tin nhắn: {content}");
+                            // Consider adding this peer to active peers if it's a new one
+                            var newPeerInfo = new PeerInfo(senderName, new IPEndPoint(remoteEndPoint.Address, 0), false);
+                            newPeerInfo.SetTcpClient(client);
+                            _activePeers.TryAdd(senderName, newPeerInfo);
+                            PeerDiscovered?.Invoke(this, new PeerDiscoveryEventArgs(senderName, newPeerInfo.EndPoint));
                         }
                     }
                     else
                     {
-                        Debug.WriteLine($"[NetworkService] Đã nhận TCP CHAT từ peer không xác định {senderName} tại {remoteEndPoint}. Tin nhắn: {content}");
+                        Debug.WriteLine($"[ProcessTcpMessage] MessageId không hợp lệ trong CHAT: {parts[2]}");
                     }
                 }
             }
@@ -880,7 +1039,7 @@ namespace Messenger
                 if (parts.Length == 2)
                 {
                     string senderName = parts[1];
-                    identifiedSenderName = senderName;
+                    identifiedSenderName = senderName; // Update associated peer name
                     Debug.WriteLine($"[NetworkService] Đã nhận HELLO từ {senderName} qua TCP từ {remoteEndPoint}.");
                     if (_activePeers.TryGetValue(senderName, out PeerInfo peerInfo))
                     {
@@ -912,7 +1071,7 @@ namespace Messenger
                 if (parts.Length == 2)
                 {
                     string senderName = parts[1];
-                    identifiedSenderName = senderName;
+                    identifiedSenderName = senderName; // Update associated peer name
                     if (senderName != _localUserName)
                     {
                         bool isTyping = message.StartsWith("TYPING_START:");
@@ -948,7 +1107,7 @@ namespace Messenger
                 var timeoutTask = Task.Delay(3000, _cancellationTokenSource.Token);
 
                 // Chờ cho một trong hai tác vụ (kết nối hoặc timeout) hoàn thành.
-                if (await Task.WhenAny(connectTask, timeoutTask) == connectTask && !connectTask.IsFaulted)
+                if (await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false) == connectTask && !connectTask.IsFaulted)
                 {
                     // Kiểm tra xem client đã kết nối thành công chưa.
                     if (client.Connected)
@@ -958,7 +1117,7 @@ namespace Messenger
                         // Ghi log thông báo kết nối thành công.
                         Debug.WriteLine($"[ConnectToPeer] Đã kết nối thành công tới {peerInfo.UserName} tại {peerInfo.EndPoint}");
                         // Gửi tin nhắn HELLO qua TCP sau khi kết nối thành công.
-                        await SendTcpHelloMessage(peerInfo);
+                        await SendTcpHelloMessage(peerInfo).ConfigureAwait(false);
                     }
                     else
                     {
@@ -1046,9 +1205,9 @@ namespace Messenger
                     byte[] lengthBytes = BitConverter.GetBytes(contentBytes.Length);
 
                     // Gửi độ dài của tin nhắn trước.
-                    await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, _cancellationTokenSource.Token);
+                    await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
                     // Gửi nội dung tin nhắn.
-                    await stream.WriteAsync(contentBytes, 0, contentBytes.Length, _cancellationTokenSource.Token);
+                    await stream.WriteAsync(contentBytes, 0, contentBytes.Length, _cancellationTokenSource.Token).ConfigureAwait(false);
                     // Ghi log thông báo đã gửi tin nhắn HELLO.
                     Debug.WriteLine($"[NetworkService] Đã gửi HELLO đến {peerInfo.UserName}");
                 }
@@ -1058,7 +1217,8 @@ namespace Messenger
                     // Ghi log thông báo việc gửi HELLO đã bị hủy.
                     Debug.WriteLine($"[NetworkService] Việc gửi HELLO đến {peerInfo.UserName} đã bị hủy.");
                     // Đóng TcpClient và đặt lại thành null.
-                    peerInfo.TcpClient.Close(); peerInfo.SetTcpClient(null);
+                    peerInfo.TcpClient?.Close(); // Use null-conditional operator
+                    peerInfo.SetTcpClient(null);
                 }
                 // Bắt bất kỳ ngoại lệ nào khác xảy ra trong quá trình gửi.
                 catch (Exception ex)
@@ -1066,7 +1226,7 @@ namespace Messenger
                     // Ghi log thông báo lỗi khi gửi HELLO.
                     Debug.WriteLine($"[NetworkService] Lỗi khi gửi HELLO đến {peerInfo.UserName}: {ex.Message}");
                     // Đóng TcpClient và đặt lại thành null.
-                    peerInfo.TcpClient.Close();
+                    peerInfo.TcpClient?.Close(); // Use null-conditional operator
                     peerInfo.SetTcpClient(null);
                 }
             }
@@ -1079,16 +1239,23 @@ namespace Messenger
             {
                 try
                 {
+                    EnsureUdpClientInitialized(); // Ensure UDP client is ready
+                    if (_udpClient == null)
+                    {
+                        Debug.WriteLine("[SendHeartbeatPeriodically] UdpClient không khả dụng sau khi khởi tạo lại. Bỏ qua gửi heartbeat.");
+                        await Task.Delay(1000, cancellationToken).ConfigureAwait(false); // Wait before retrying
+                        continue;
+                    }
                     // Tạo tin nhắn heartbeat chứa tên người dùng cục bộ và cổng TCP đang lắng nghe.
                     string heartbeatMessage = $"HEARTBEAT:{_localUserName}:{_tcpPort}";
                     // Chuyển đổi tin nhắn heartbeat thành mảng byte sử dụng mã hóa UTF8.
                     byte[] data = Encoding.UTF8.GetBytes(heartbeatMessage);
                     // Gửi tin nhắn heartbeat qua UDP đến địa chỉ multicast và cổng multicast.
-                    await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort));
+                    await _udpClient.SendAsync(data, data.Length, new IPEndPoint(_multicastAddress, _multicastPort)).ConfigureAwait(false);
                     // Ghi log thông báo đã gửi heartbeat.
                     Debug.WriteLine($"[SendHeartbeatPeriodically] Đã gửi heartbeat: {heartbeatMessage} đến {_multicastAddress}:{_multicastPort}");
                     // Chờ 10 giây trước khi gửi heartbeat tiếp theo.
-                    await Task.Delay(10000, cancellationToken);
+                    await Task.Delay(10000, cancellationToken).ConfigureAwait(false);
                 }
                 // Bắt lỗi OperationCanceledException nếu tác vụ bị hủy.
                 catch (OperationCanceledException)
@@ -1097,13 +1264,19 @@ namespace Messenger
                     Debug.WriteLine("[SendHeartbeatPeriodically] Tác vụ đã bị hủy");
                     break;
                 }
+                catch (ObjectDisposedException ex)
+                {
+                    Debug.WriteLine($"[SendHeartbeatPeriodically] Lỗi ObjectDisposedException: {ex.Message}. UdpClient đã bị giải phóng.");
+                    _udpClient = null; // Đặt về null để buộc khởi tạo lại
+                    await Task.Delay(1000, cancellationToken).ConfigureAwait(false); // Chờ trước khi thử lại
+                }
                 // Bắt bất kỳ ngoại lệ nào khác xảy ra trong quá trình gửi heartbeat.
                 catch (Exception ex)
                 {
                     // Ghi log thông báo lỗi.
                     Debug.WriteLine($"[SendHeartbeatPeriodically] Lỗi: {ex.Message}");
                     // Nếu không có yêu cầu hủy bỏ, chờ 1 giây trước khi tiếp tục vòng lặp.
-                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(1000, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -1131,7 +1304,7 @@ namespace Messenger
                         if (peerInfo.IsLocal && peerInfo.UserName == _localUserName) continue;
 
                         // Kiểm tra xem thời gian kể từ lần heartbeat cuối cùng có vượt quá 30 giây không.
-                        if ((now - peerInfo.LastHeartbeat).TotalSeconds > 30) // Tăng từ 15 lên 30 giây
+                        if ((now - peerInfo.LastHeartbeat).TotalSeconds > 90) // Increased timeout to 90 seconds
                         {
                             // Ghi log thông báo rằng peer này sẽ bị đánh dấu để loại bỏ.
                             Debug.WriteLine($"[CleanupDisconnectedPeers] Đánh dấu người dùng để xóa: {peerName}, Hoạt động lần cuối: {peerInfo.LastHeartbeat}");
@@ -1160,12 +1333,13 @@ namespace Messenger
                     }
 
                     // Chờ 10 giây trước khi thực hiện lại việc dọn dẹp các peer đã ngắt kết nối.
-                    await Task.Delay(10000, cancellationToken);
+                    await Task.Delay(10000, cancellationToken).ConfigureAwait(false);
                 }
                 // Bắt lỗi OperationCanceledException nếu tác vụ bị hủy.
                 catch (OperationCanceledException)
                 {
                     // Thoát khỏi vòng lặp nếu tác vụ bị hủy.
+                    Debug.WriteLine("[CleanupDisconnectedPeers] Tác vụ đã bị hủy");
                     break;
                 }
                 // Bắt bất kỳ ngoại lệ nào khác xảy ra trong quá trình dọn dẹp.
@@ -1174,7 +1348,7 @@ namespace Messenger
                     // Ghi log thông báo lỗi.
                     Debug.WriteLine($"[CleanupDisconnectedPeers] Lỗi: {ex.Message}");
                     // Nếu không có yêu cầu hủy bỏ, chờ 1 giây trước khi tiếp tục vòng lặp.
-                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(1000, cancellationToken);
+                    if (!cancellationToken.IsCancellationRequested) await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -1230,10 +1404,10 @@ namespace Messenger
                 Task[] tasks = { _udpListenTask, _tcpListenTask, _heartbeatTask, _peerCleanupTask };
                 // Lọc ra các tác vụ đang chạy (không phải null, chưa hoàn thành, chưa bị hủy hoặc lỗi).
                 var runningTasks = tasks.Where(t => t != null && !t.IsCompleted && !t.IsCanceled && !t.IsFaulted).ToArray();
-                // Chờ tất cả các tác vụ đang chạy hoàn thành trong vòng 2 giây.
+                // Chờ tất cả các tác vụ đang chạy hoàn thành trong vòng 5 giây.
                 if (runningTasks.Any())
                 {
-                    Task.WaitAll(runningTasks, TimeSpan.FromSeconds(2));
+                    Task.WaitAll(runningTasks, TimeSpan.FromSeconds(5)); // Increased timeout for tasks to finish
                 }
                 Debug.WriteLine("[NetworkService] Các tác vụ nền đã được chờ hoặc đã hoàn thành.");
             }
@@ -1258,8 +1432,10 @@ namespace Messenger
                 {
                     try
                     {
+                        _udpClient.Client.Shutdown(SocketShutdown.Both); // Shutdown socket gracefully
                         _udpClient.Close();
                         _udpClient.Dispose();
+                        _udpClient = null; // Set to null after disposal
                         Debug.WriteLine("[NetworkService] UDP Client đã đóng và giải phóng.");
                     }
                     catch (Exception ex)
@@ -1279,6 +1455,7 @@ namespace Messenger
 
                 // Giải phóng cancellation token source.
                 _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = null; // Set to null after disposal
                 Debug.WriteLine("[NetworkService] Giải phóng hoàn tất.");
             }
         }
@@ -1308,6 +1485,7 @@ namespace Messenger
                 try
                 {
                     // Đóng và giải phóng TcpClient cũ.
+                    Debug.WriteLine($"[PeerInfo] Giải phóng TcpClient cũ cho {UserName}.");
                     TcpClient.Close();
                     TcpClient.Dispose();
                 }
@@ -1325,8 +1503,12 @@ namespace Messenger
             try
             {
                 // Đóng và giải phóng TcpClient nếu nó tồn tại.
-                TcpClient?.Close();
-                TcpClient?.Dispose();
+                if (TcpClient != null)
+                {
+                    Debug.WriteLine($"[PeerInfo] Giải phóng TcpClient cho {UserName} trong PeerInfo.Dispose.");
+                    TcpClient.Close();
+                    TcpClient.Dispose();
+                }
             }
             catch (Exception ex)
             {
