@@ -63,26 +63,27 @@ namespace Messenger
             string senderName = message.IsMyMessage ? "" : message.SenderName;
 
             // Tính toán các kích thước và khoảng cách cố định cho việc vẽ tin nhắn.
-            int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f); // Chiều rộng tối đa của "bong bóng" tin nhắn (70% chiều rộng ListBox).
-            int horizontalBubblePadding = 15; // Khoảng cách ngang bên trong "bong bóng".
-            int verticalBubblePadding = 10; // Khoảng cách dọc bên trong "bong bóng".
-            int timestampBubbleGap = 8; // Khoảng cách giữa "bong bóng" và thời gian.
-            int itemBottomMargin = 8; // Khoảng cách dưới cùng của mỗi mục tin nhắn.
-            int avatarSize = 40; // Kích thước avatar (nếu có).
-            int avatarPadding = 5; // Khoảng cách giữa avatar và tin nhắn.
-            int senderNameGap = 5; // Khoảng cách giữa tên người gửi và nội dung tin nhắn.
+            int maxBubbleContentWidth = (int)(listBoxWidth * 0.70f);
+            int horizontalBubblePadding = 15;
+            int verticalBubblePadding = 10;
+            int timestampBubbleGap = 8;
+            int itemBottomMargin = 8;
+            int avatarSize = 40;
+            int avatarPadding = 5;
 
             // Tạo StringFormat để hỗ trợ xuống dòng và đo kích thước chính xác.
             StringFormat stringFormat = new StringFormat(StringFormat.GenericTypographic)
             {
                 FormatFlags = StringFormatFlags.LineLimit | StringFormatFlags.MeasureTrailingSpaces,
-                Trimming = StringTrimming.Word // Cắt từ khi xuống dòng.
+                Trimming = StringTrimming.Word
             };
 
             // Đo kích thước nội dung tin nhắn.
-            float maxWidth = maxBubbleContentWidth - (2 * horizontalBubblePadding); // Chiều rộng tối đa cho nội dung thực tế.
-            float maxContentWidth = 0; // Biến để theo dõi chiều rộng tối đa của nội dung (có thể nhiều dòng).
-            float currentY = 0; // Biến để theo dõi vị trí Y hiện tại khi xử lý nhiều dòng.
+            float maxWidth = maxBubbleContentWidth - (2 * horizontalBubblePadding);
+            float calculatedContentWidth = 0; // Biến để theo dõi chiều rộng thực tế của nội dung
+            float maxContentHeight = 0; // Chiều cao tối đa của nội dung
+            float currentY = 0; // Vị trí Y hiện tại khi xử lý nhiều dòng.
+            float lineSpacing = g.MeasureString(" ", defaultFont).Height / 4; // Khoảng cách giữa các dòng
 
             // Tìm kiếm và xử lý các URL trong nội dung tin nhắn để tính toán kích thước và vùng vẽ.
             MatchCollection matches = UrlRegex.Matches(displayText);
@@ -96,17 +97,18 @@ namespace Messenger
                 {
                     string preUrlText = displayText.Substring(lastIndex, match.Index - lastIndex);
                     SizeF preUrlSize = g.MeasureString(preUrlText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
-                    maxContentWidth = Math.Max(maxContentWidth, preUrlSize.Width);
-                    currentY += preUrlSize.Height; // Tăng chiều cao theo kích thước phần văn bản.
+                    maxContentHeight = Math.Max(maxContentHeight, currentY + preUrlSize.Height);
+                    calculatedContentWidth = Math.Max(calculatedContentWidth, preUrlSize.Width);
+                    currentY += preUrlSize.Height + lineSpacing;
                 }
 
                 // Xử lý URL.
                 string url = match.Value;
                 SizeF urlSize = g.MeasureString(url, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
-                maxContentWidth = Math.Max(maxContentWidth, urlSize.Width);
-                // Thêm vùng URL vào danh sách để xử lý sự kiện click sau này.
-                message.UrlRegions.Add(new UrlRegion(new RectangleF(0, currentY, urlSize.Width, urlSize.Height), url));
-                currentY += urlSize.Height; // Tăng chiều cao theo kích thước URL.
+                maxContentHeight = Math.Max(maxContentHeight, currentY + urlSize.Height);
+                calculatedContentWidth = Math.Max(calculatedContentWidth, urlSize.Width);
+                message.UrlRegions.Add(new UrlRegion(new RectangleF(0, currentY - urlSize.Height, urlSize.Width, urlSize.Height), url));
+                currentY += urlSize.Height + lineSpacing;
 
                 // Cập nhật vị trí cuối cùng đã xử lý.
                 lastIndex = match.Index + match.Length;
@@ -117,12 +119,13 @@ namespace Messenger
             {
                 string remainingText = displayText.Substring(lastIndex);
                 SizeF remainingSize = g.MeasureString(remainingText, defaultFont, new SizeF(maxWidth, float.MaxValue), stringFormat);
-                maxContentWidth = Math.Max(maxContentWidth, remainingSize.Width);
-                currentY += remainingSize.Height; // Tăng chiều cao theo kích thước phần văn bản còn lại.
+                maxContentHeight = Math.Max(maxContentHeight, currentY + remainingSize.Height);
+                calculatedContentWidth = Math.Max(calculatedContentWidth, remainingSize.Width);
+                currentY += remainingSize.Height + lineSpacing;
             }
 
             // Lưu kích thước đã tính toán của nội dung tin nhắn.
-            message.CalculatedContentSize = new SizeF(maxContentWidth, currentY);
+            message.CalculatedContentSize = new SizeF(calculatedContentWidth, maxContentHeight);
 
             // Đo kích thước tên người gửi (nếu có).
             SizeF senderNameSizeF = new SizeF(0, 0);
@@ -137,19 +140,29 @@ namespace Messenger
             }
 
             // Đo kích thước thời gian gửi tin nhắn.
-            SizeF timestampSizeF = g.MeasureString(message.Timestamp.ToString("HH:mm"), _timestampFont, maxBubbleContentWidth, stringFormat);
+            SizeF timestampSizeF = g.MeasureString(message.Timestamp.ToString("HH:mm"), _timestampFont);
             message.CalculatedTimestampSize = new SizeF((float)Math.Ceiling(timestampSizeF.Width), (float)Math.Ceiling(timestampSizeF.Height));
 
-            // Tính toán kích thước của "bong bóng" tin nhắn.
-            float bubbleWidth = message.CalculatedContentSize.Width + (2 * horizontalBubblePadding);
-            float bubbleHeight = message.CalculatedContentSize.Height + (2 * verticalBubblePadding);
+            // Tính toán chiều rộng cuối cùng của "bong bóng" tin nhắn.
+            float bubbleWidth = Math.Min(message.CalculatedContentSize.Width + (2 * horizontalBubblePadding), maxBubbleContentWidth);
 
-            // Tính toán tổng kích thước của mục tin nhắn trong ListBox.
-            message.CalculatedTotalSize = new SizeF(
-                Math.Max(bubbleWidth, message.CalculatedSenderNameSize.Width) + (message.Avatar != null ? avatarSize + avatarPadding : 0) + 20, // Chiều rộng (có khoảng trống thêm 20)
-                bubbleHeight + timestampBubbleGap + message.CalculatedTimestampSize.Height + itemBottomMargin + (senderNameSizeF.Height > 0 ? senderNameSizeF.Height + senderNameGap : 0) // Chiều cao (tính cả tên người gửi nếu có)
-            );
+            // Tính toán kích thước cuối cùng của toàn bộ mục tin nhắn.
+            float totalWidth = bubbleWidth + (message.IsMyMessage ? 0 : avatarSize + avatarPadding);
+            float totalHeight = Math.Max(message.CalculatedContentSize.Height + verticalBubblePadding * 2 + message.CalculatedSenderNameSize.Height, avatarSize) + itemBottomMargin;
+
+            // Nếu tin nhắn không phải của người dùng hiện tại, cộng thêm khoảng cách cho avatar.
+            if (!message.IsMyMessage)
+            {
+                // Đã được tính trong totalWidth
+            }
+
+            // Cộng thêm khoảng cách cho thời gian
+            totalHeight += timestampSizeF.Height + timestampBubbleGap;
+
+            message.CalculatedTotalSize = new SizeF((float)Math.Ceiling(totalWidth), (float)Math.Ceiling(totalHeight));
+            message.LastCalculatedWidth = listBoxWidth;
         }
+
 
 
         public static void DrawMessage(Graphics g, Rectangle bounds, ChatMessage message, DrawItemState state, Font defaultFont, Image avatar)
